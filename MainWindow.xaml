@@ -1,0 +1,410 @@
+<Window x:Class="K2AzureMigrator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:K2AzureMigrator"
+        Title="K2 Azure Migration Utility"
+        Width="980" Height="760" MinWidth="820" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="#F0F2F5">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="HeaderBrush"     Color="#1565C0"/>
+        <SolidColorBrush x:Key="SectionBrush"    Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="BorderColor"     Color="#DADCE0"/>
+        <SolidColorBrush x:Key="LabelBrush"      Color="#5F6368"/>
+        <SolidColorBrush x:Key="TextBrush"       Color="#202124"/>
+        <SolidColorBrush x:Key="PassBrush"       Color="#1B7F3A"/>
+        <SolidColorBrush x:Key="FailBrush"       Color="#C62828"/>
+        <SolidColorBrush x:Key="WarnBrush"       Color="#E65100"/>
+        <SolidColorBrush x:Key="PendingBrush"    Color="#9AA0A6"/>
+
+        <local:StringToVisibilityConverter x:Key="StrVis"/>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background"      Value="{StaticResource SectionBrush}"/>
+            <Setter Property="BorderBrush"     Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius"    Value="6"/>
+            <Setter Property="Padding"         Value="14,10"/>
+        </Style>
+
+        <Style x:Key="SectionHead" TargetType="TextBlock">
+            <Setter Property="FontSize"   Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource LabelBrush}"/>
+            <Setter Property="Margin"     Value="0,0,0,8"/>
+        </Style>
+
+        <Style x:Key="InputLabel" TargetType="TextBlock">
+            <Setter Property="FontSize"          Value="12"/>
+            <Setter Property="Foreground"        Value="{StaticResource LabelBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="TxtInput" TargetType="TextBox">
+            <Setter Property="FontSize"                  Value="13"/>
+            <Setter Property="Height"                    Value="30"/>
+            <Setter Property="Padding"                   Value="6,0"/>
+            <Setter Property="BorderBrush"               Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness"           Value="1"/>
+            <Setter Property="VerticalContentAlignment"  Value="Center"/>
+        </Style>
+
+        <Style x:Key="PwdInput" TargetType="PasswordBox">
+            <Setter Property="FontSize"                  Value="13"/>
+            <Setter Property="Height"                    Value="30"/>
+            <Setter Property="Padding"                   Value="6,0"/>
+            <Setter Property="BorderBrush"               Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness"           Value="1"/>
+            <Setter Property="VerticalContentAlignment"  Value="Center"/>
+        </Style>
+
+        <Style x:Key="Btn" TargetType="Button">
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Height"          Value="32"/>
+            <Setter Property="Padding"         Value="16,0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="#1565C0"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1976D2"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="#B71C1C"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#D32F2F"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SecBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="#E8EAED"/>
+            <Setter Property="Foreground" Value="#202124"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#DADCE0"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="54"/>   <!-- header -->
+            <RowDefinition Height="Auto"/> <!-- connection -->
+            <RowDefinition Height="*"/>    <!-- checks + discovery -->
+            <RowDefinition Height="165"/>  <!-- log -->
+            <RowDefinition Height="52"/>   <!-- footer -->
+        </Grid.RowDefinitions>
+
+        <!-- ══ HEADER ══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="0" Background="{StaticResource HeaderBrush}">
+            <Grid Margin="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="K2" FontSize="22" FontWeight="Bold"
+                               Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock Text=" Azure Migration Utility" FontSize="17"
+                               Foreground="#BBDEFB" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock Grid.Column="1" x:Name="TxtHeaderStatus"
+                           VerticalAlignment="Center" FontSize="12" Foreground="#90CAF9"/>
+            </Grid>
+        </Border>
+
+        <!-- ══ CONNECTION ═══════════════════════════════════════════════════════ -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="12,10,12,4">
+            <StackPanel>
+                <TextBlock Text="CONNECTION" Style="{StaticResource SectionHead}"/>
+
+                <!-- Server / Database / Auth -->
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="175"/>
+                        <ColumnDefinition Width="14"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="18"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Server" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                    <TextBox   Grid.Column="1" x:Name="TxtServer"   Text="." Style="{StaticResource TxtInput}"/>
+                    <TextBlock Grid.Column="3" Text="Database" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                    <TextBox   Grid.Column="4" x:Name="TxtDatabase" Text="K2" Style="{StaticResource TxtInput}"/>
+                    <CheckBox  Grid.Column="6" x:Name="ChkTrusted"
+                               Content="Windows Authentication" IsChecked="True"
+                               VerticalAlignment="Center" FontSize="12"
+                               Foreground="{StaticResource TextBrush}"
+                               Checked="ChkTrusted_Changed" Unchecked="ChkTrusted_Changed"/>
+                </Grid>
+
+                <!-- SQL Auth row (hidden when trusted) -->
+                <Grid x:Name="PanelSqlAuth" Visibility="Collapsed" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="175"/>
+                        <ColumnDefinition Width="14"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="175"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Username" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                    <TextBox   Grid.Column="1" x:Name="TxtUsername" Style="{StaticResource TxtInput}"/>
+                    <TextBlock Grid.Column="3" Text="Password" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                    <PasswordBox Grid.Column="4" x:Name="PwdSqlPassword" Style="{StaticResource PwdInput}"/>
+                </Grid>
+
+                <!-- Master key password + Test Connection -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="310"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Master Key Password"
+                               Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                    <PasswordBox Grid.Column="1" x:Name="PwdMasterKey" Style="{StaticResource PwdInput}"
+                                 ToolTip="Leave blank to use the K2 default password"/>
+                    <TextBlock Grid.Column="3" Text="blank = K2 default" FontSize="11"
+                               Foreground="{StaticResource LabelBrush}" VerticalAlignment="Center"
+                               Margin="0,0,10,0" FontStyle="Italic"/>
+                    <TextBlock Grid.Column="4" x:Name="TxtConnResult" FontSize="12"
+                               VerticalAlignment="Center" Foreground="{StaticResource LabelBrush}"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="5" x:Name="BtnTestConn" Content="Test Connection"
+                            Style="{StaticResource SecBtn}" Click="BtnTestConn_Click"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- ══ CHECKS + DISCOVERY ═══════════════════════════════════════════════ -->
+        <Grid Grid.Row="2" Margin="12,4,12,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Pre-flight checks -->
+            <Border Grid.Column="0" Style="{StaticResource Card}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="PRE-FLIGHT CHECKS" Style="{StaticResource SectionHead}"/>
+                    <ItemsControl Grid.Row="1" x:Name="CheckList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="22"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" x:Name="Icon"
+                                               Text="○" FontSize="14" FontWeight="Bold"
+                                               Foreground="{StaticResource PendingBrush}"
+                                               VerticalAlignment="Top" HorizontalAlignment="Center"
+                                               Margin="0,1,0,0"/>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Name}" FontSize="12"
+                                                   Foreground="{StaticResource TextBrush}"/>
+                                        <TextBlock Text="{Binding Detail}" FontSize="11"
+                                                   Foreground="{StaticResource LabelBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="{Binding Detail, Converter={StaticResource StrVis}}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Status}" Value="Pass">
+                                        <Setter TargetName="Icon" Property="Text"       Value="✓"/>
+                                        <Setter TargetName="Icon" Property="Foreground" Value="{StaticResource PassBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="Fail">
+                                        <Setter TargetName="Icon" Property="Text"       Value="✗"/>
+                                        <Setter TargetName="Icon" Property="Foreground" Value="{StaticResource FailBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="Warning">
+                                        <Setter TargetName="Icon" Property="Text"       Value="⚠"/>
+                                        <Setter TargetName="Icon" Property="Foreground" Value="{StaticResource WarnBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="Running">
+                                        <Setter TargetName="Icon" Property="Text"       Value="…"/>
+                                        <Setter TargetName="Icon" Property="Foreground" Value="#1565C0"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+
+            <!-- Discovery -->
+            <Border Grid.Column="2" Style="{StaticResource Card}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="DISCOVERY" Style="{StaticResource SectionHead}"/>
+
+                    <!-- Stat tiles -->
+                    <Grid Grid.Row="1" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="#E8F5E9" CornerRadius="4" Padding="8,6">
+                            <StackPanel>
+                                <TextBlock x:Name="TxtConfigCount" Text="—" FontSize="26" FontWeight="Bold"
+                                           Foreground="{StaticResource PassBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Encrypted config rows" FontSize="10"
+                                           Foreground="{StaticResource LabelBrush}"
+                                           HorizontalAlignment="Center" TextAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="2" Background="#FFF3E0" CornerRadius="4" Padding="8,6">
+                            <StackPanel>
+                                <TextBlock x:Name="TxtSmartboxCount" Text="—" FontSize="26" FontWeight="Bold"
+                                           Foreground="{StaticResource WarnBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="SmartBox enc. cols" FontSize="10"
+                                           Foreground="{StaticResource LabelBrush}"
+                                           HorizontalAlignment="Center" TextAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- SmartBox detail (when present) -->
+                    <ItemsControl Grid.Row="2" x:Name="SmartboxList" Margin="0,0,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock FontSize="11" FontFamily="Consolas"
+                                           Foreground="{StaticResource WarnBrush}">
+                                    <Run Text="{Binding TableName}"/><Run Text="."/><Run Text="{Binding ColumnName}"/>
+                                    <Run Text=" ("/><Run Text="{Binding RowCount}"/><Run Text=" rows)"/>
+                                </TextBlock>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Token list -->
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Tokens to be decrypted:" FontSize="11"
+                                   Foreground="{StaticResource LabelBrush}" Margin="0,0,0,4"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="TokenList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" FontSize="11" FontFamily="Consolas"
+                                                   Foreground="{StaticResource TextBrush}" Margin="0,1"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ══ LOG ══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="3" Margin="12,4,12,4" CornerRadius="6"
+                Background="#1E2228" BorderBrush="#3C4043" BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="LOG" FontSize="10" FontWeight="SemiBold"
+                           Foreground="#5F6368" Margin="10,5,0,2"/>
+                <ScrollViewer Grid.Row="1" x:Name="LogScroller"
+                              VerticalScrollBarVisibility="Auto" Margin="0,0,0,4">
+                    <TextBox x:Name="TxtLog" IsReadOnly="True" Background="Transparent"
+                             Foreground="#D4D4D4" FontFamily="Consolas" FontSize="12"
+                             BorderThickness="0" Padding="10,0,10,6"
+                             TextWrapping="Wrap" AcceptsReturn="True"/>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- ══ FOOTER ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="4" Background="White"
+                BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
+            <Grid Margin="12,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="20"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <CheckBox Grid.Column="0" x:Name="ChkDropCrypto" IsChecked="True"
+                          Content="Drop encryption objects after migration"
+                          VerticalAlignment="Center" FontSize="12"
+                          Foreground="{StaticResource TextBrush}"/>
+                <CheckBox Grid.Column="2" x:Name="ChkDryRun" IsChecked="False"
+                          Content="Dry run (no changes)"
+                          VerticalAlignment="Center" FontSize="12"
+                          Foreground="{StaticResource TextBrush}"/>
+
+                <Button Grid.Column="4"  x:Name="BtnRunChecks"   Content="Run Checks"
+                        Style="{StaticResource SecBtn}"     Width="110" IsEnabled="False"
+                        Click="BtnRunChecks_Click"/>
+                <Button Grid.Column="6"  x:Name="BtnDryRun"      Content="Dry Run"
+                        Style="{StaticResource PrimaryBtn}" Width="90"  IsEnabled="False"
+                        Click="BtnDryRun_Click"/>
+                <Button Grid.Column="8"  x:Name="BtnExecute"     Content="Execute Migration"
+                        Style="{StaticResource DangerBtn}"  Width="150" IsEnabled="False"
+                        Click="BtnExecute_Click"/>
+                <Button Grid.Column="10" x:Name="BtnSaveReport"  Content="Save Report"
+                        Style="{StaticResource SecBtn}"     Width="110" IsEnabled="False"
+                        Click="BtnSaveReport_Click"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
