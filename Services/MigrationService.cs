@@ -147,7 +147,7 @@ public class MigrationService
             // 3. SQL Encryption Active
             Update(list[2], CheckStatus.Running);
             string? useSqlEnc = await ScalarStringAsync(conn,
-                "SELECT [VariableValue] FROM [HostServer].[Configuration] WHERE [VariableToken] = '[[USESQLENCRYPTION]]'");
+                "SELECT [VariableValue] FROM [HostServer].[Configuration] WHERE [VariableToken] = '[USESQLENCRYPTION]'");
             if (!string.Equals(useSqlEnc, "True", StringComparison.OrdinalIgnoreCase))
             {
                 Update(list[2], CheckStatus.Fail,
@@ -541,7 +541,7 @@ public class MigrationService
                 await ExecAsync(conn, tx, @"
                     UPDATE [HostServer].[Configuration]
                     SET    [VariableValue] = 'False'
-                    WHERE  [VariableToken] = '[[USESQLENCRYPTION]]'");
+                    WHERE  [VariableToken] = '[USESQLENCRYPTION]'");
                 result.UseSqlEncryptionCleared = true;
                 Log("[USESQLENCRYPTION] updated.");
 
