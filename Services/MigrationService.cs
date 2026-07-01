@@ -54,7 +54,8 @@ public class MigrationService
         {
             DataSource = string.IsNullOrWhiteSpace(server) ? "." : server,
             InitialCatalog = string.IsNullOrWhiteSpace(database) ? "K2" : database,
-            ConnectTimeout = 10
+            ConnectTimeout = 10,
+            TrustServerCertificate = true
         };
         if (trustedAuth)
         {
@@ -78,7 +79,12 @@ public class MigrationService
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            Logger.LogError("TestConnectionAsync", ex);
+            const int maxLen = 100;
+            string shown = ex.Message.Length > maxLen
+                ? ex.Message[..maxLen].TrimEnd() + "… (see log)"
+                : ex.Message;
+            return (false, shown);
         }
     }
 
