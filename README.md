@@ -1,6 +1,11 @@
 # K2 Azure Migration Utility
 
-A WPF desktop tool that prepares an on-premises K2 blackpearl database for migration to Azure SQL by stripping the SQL Server symmetric key encryption that Azure SQL cannot carry across.
+A WPF desktop tool that prepares an on-premises K2 blackpearl database for migration to Azure SQL. It has two phases:
+
+1. **Decrypt for Migration** — strips the SQL Server symmetric key encryption that Azure SQL cannot carry across (see below).
+2. **Schema Sync (Azure DACPAC)** — deploys the schema from a given K2 version's own Azure-targeted DACPAC against the database, so what gets migrated matches exactly what that K2 version's installer expects — not just whatever schema state the source database happened to be in.
+
+Phase 2 exists because a straight BACPAC copy only ever carries the schema the source database had at export time. If that source predates a K2 patch that added a column, procedure, or other object, the copy will too — and K2's setup does not reliably self-heal that gap during an upgrade (its own "skip files/objects that already look present" logic isn't version-aware). Running Phase 2 against the target K2 version's DACPAC closes that gap before you ever touch the setup wizard.
 
 ---
 
@@ -126,14 +131,56 @@ All data changes run inside a single SQL transaction with `XACT_ABORT ON`. If an
 
 ---
 
-## After the utility completes
+## After the utility completes (Phase 1)
 
-1. **Export BACPAC** from the source database:
+1. **Run Phase 2 (Schema Sync)** — see below — either now against this same source database, or later against the Azure SQL database after import. Doing it now catches problems before you round-trip through a BACPAC.
+2. **Export BACPAC** from the source database:
    ```
    SqlPackage.exe /Action:Export /SourceConnectionString:"Server=...;Database=K2;..." /TargetFile:"K2_azure_ready.bacpac"
    ```
-2. **Import BACPAC** into Azure SQL via the Azure Portal, SSMS, or SqlPackage
-3. **Run K2 setup** pointing at the new Azure SQL instance — the setup will detect Azure (via `SELECT @@VERSION` regex), confirm `[USESQLENCRYPTION]` = False, and configure the environment without attempting to create or open any symmetric keys
+3. **Import BACPAC** into Azure SQL via the Azure Portal, SSMS, or SqlPackage
+4. If Phase 2 wasn't run pre-export, **run it now** against the Azure SQL database — this is the step that actually matters, since it's the database K2 setup will connect to
+5. **Run K2 setup** pointing at the new Azure SQL instance — the setup will detect Azure (via `SELECT @@VERSION` regex), confirm `[USESQLENCRYPTION]` = False, and configure the environment without attempting to create or open any symmetric keys
+
+---
+
+## Schema Sync (Azure DACPAC)
+
+### Why this exists
+
+A BACPAC only ever contains the schema the source database had at the moment of export. If the on-prem K2 instance you're migrating from is behind the target K2 version — even by one cumulative patch — any column, table, or stored procedure added since won't be in the copy. K2's setup does not reliably fill that gap on its own: its file/object "skip if it looks already present" logic checks for existence, not version, so a stale schema can sit there silently until something at runtime actually needs the missing piece (observed directly during a 5.8→5.9 upgrade in this environment: a post-upgrade data-fixup script failed with `Invalid column name 'TemplateValue'` because the migrated database predated that column).
+
+Every K2 installer ships the schema it expects as a DACPAC — a declarative, versioned schema snapshot used by Microsoft's `SqlPackage`/DacFx tooling — split into two platform variants:
+
+```
+Installation\Data\SourceCode.Data.All.SqlServer.zip\SourceCode.Data.All.dacpac   (on-prem SQL Server target)
+Installation\Data\SourceCode.Data.All.AzureDb.zip\SourceCode.Data.All.dacpac     (Azure SQL target)
+```
+
+This phase points the **Azure** variant at your working database and lets DacFx compute and apply whatever schema diff is needed to bring it fully in line with that K2 version's baseline — in one pass, rather than discovering gaps one crash at a time during setup.
+
+### Usage
+
+1. In the **Server / Database / Auth** fields at the top (shared with Phase 1), connect to whichever database you want to sync — the on-prem source pre-export, or the Azure SQL database post-import
+2. Switch to the **2. Schema Sync (Azure DACPAC)** tab
+3. In **DACPAC Source**, browse to (or paste the path of) the target K2 version's installation media root, the `SourceCode.Data.All.AzureDb.zip` file directly, or an already-extracted `.dacpac`
+4. Click **Locate** — confirms the package was found and loaded, and warns if the filename suggests you picked the on-prem `SqlServer.zip` variant by mistake
+5. Click **Generate Script** to preview the exact T-SQL that would run, with no changes made — safe on a live database. The full script is written to the log
+6. Review the script, then click **Apply Schema Sync** to actually deploy it — confirm the dialog to proceed
+7. **Save Report** captures both phases' logs together
+
+### Options
+
+| Option | Default | Effect |
+|---|---|---|
+| Block deployment if a change could lose data | On | Maps to DacFx's `BlockOnPossibleDataLoss`. Recommended — forces you to look at anything that would truncate or drop data-bearing objects rather than silently proceeding. |
+| Drop objects not present in the DACPAC | Off | Maps to DacFx's `DropObjectsNotInSource`. **Leave this off** unless you specifically want an exact byte-for-byte schema match — a live K2 database can legitimately have objects (SmartObject-generated tables, customizations) that aren't part of the base DACPAC model, and this option would drop them. |
+
+### Implementation notes
+
+- Uses the `Microsoft.SqlServer.DacFx` NuGet package directly (`Microsoft.SqlServer.Dac.DacServices`) — no dependency on `SqlPackage.exe` being installed separately
+- `DacServices.Script(...)` generates the diff without touching the database (Generate Script); `DacServices.Deploy(...)` applies it (Apply Schema Sync) — same dry-run/execute pattern as Phase 1
+- The located `.dacpac` is extracted to a temp file per run; nothing is written back into the install media
 
 ---
 
@@ -141,21 +188,25 @@ All data changes run inside a single SQL transaction with `XACT_ABORT ON`. If an
 
 ```
 K2AzureMigrator/
-├── K2AzureMigrator.csproj      .NET 9 WPF project
+├── K2AzureMigrator.csproj      .NET 8 WPF project
 ├── App.xaml / App.xaml.cs
-├── MainWindow.xaml              UI layout
+├── MainWindow.xaml              UI layout — two tabs sharing one connection panel and log
 ├── MainWindow.xaml.cs           Event handlers and UI logic
 └── Services/
-    └── MigrationService.cs      All SQL logic — pre-flight, discovery, execute
+    ├── MigrationService.cs      Phase 1 — encryption pre-flight, discovery, decrypt/execute
+    ├── SchemaSyncService.cs     Phase 2 — locate DACPAC, generate script, deploy via DacFx
+    └── Logger.cs                Shared file-based error logging
 ```
 
-**Dependencies:** `Microsoft.Data.SqlClient 5.2.2` (no other external packages)
+**Dependencies:** `Microsoft.Data.SqlClient 5.2.2`, `Microsoft.SqlServer.DacFx 162.3.566`
 
 ---
 
 ## Limitations
 
 - Targets K2 blackpearl specifically — the schema assumptions (`[HostServer].[Configuration]`, `[Smartbox].[SmartboxObject]`, etc.) are K2-specific
-- Requires direct SQL Server access to the source database — cannot work against an already-imported Azure SQL BACPAC
+- Phase 1 requires direct SQL Server access to the source database — cannot work against an already-imported Azure SQL BACPAC
 - Does not perform the BACPAC export or Azure SQL import — those steps are intentionally left to standard tooling
 - If `DecryptByKey()` returns NULL for any rows (wrong key, or data encrypted on a different server instance), those rows are skipped and flagged in the report rather than written as NULL
+- Phase 2's "is this the Azure variant" check is filename-based (it looks for `AzureDb` in the zip name) — it does not deeply inspect the DACPAC's internal schema-provider metadata, so a renamed zip could slip past the warning
+- Phase 2 fixes schema drift only. It does not address stale-but-present binaries or GAC assemblies on the K2 application server itself — that is a separate class of problem (see the migration analysis doc) and is unrelated to the database

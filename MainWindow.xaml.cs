@@ -13,10 +13,12 @@ namespace K2AzureMigrator;
 public partial class MainWindow : Window
 {
     private readonly MigrationService _svc = new();
+    private readonly SchemaSyncService _schemaSvc = new();
     private readonly ObservableCollection<PreFlightCheck> _checks = [];
     private CancellationTokenSource? _cts;
     private string _lastLog = "";
     private bool _checksPassedForExecute;
+    private string? _locatedDacpacPath;
 
     public MainWindow()
     {
@@ -65,6 +67,11 @@ public partial class MainWindow : Window
             BtnDryRun.IsEnabled = !busy && _checksPassedForExecute;
             BtnExecute.IsEnabled = !busy && _checksPassedForExecute;
             BtnSaveReport.IsEnabled = !busy && _lastLog.Length > 0;
+
+            BtnBrowseDacpac.IsEnabled = !busy;
+            BtnLocateDacpac.IsEnabled = !busy;
+            BtnGenerateScript.IsEnabled = !busy && _locatedDacpacPath != null;
+            BtnApplySchemaSync.IsEnabled = !busy && _locatedDacpacPath != null;
         });
     }
 
@@ -285,6 +292,158 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            AppendLog($"  FATAL: {ex.Message}");
+            SetStatus("Error");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    // ── Schema Sync (Azure DACPAC) ──────────────────────────────────────────
+
+    private void BtnBrowseDacpac_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select K2 installation media, the AzureDb zip, or a .dacpac file",
+            Filter = "K2 DACPAC or zip (*.dacpac;*.zip)|*.dacpac;*.zip|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+        if (dlg.ShowDialog() == true)
+            TxtDacpacPath.Text = dlg.FileName;
+    }
+
+    private void BtnLocateDacpac_Click(object sender, RoutedEventArgs e)
+    {
+        _locatedDacpacPath = null;
+        TxtDacpacStatus.Text = "Searching…";
+        TxtDacpacStatus.Foreground = (SolidColorBrush)FindResource("LabelBrush");
+
+        var result = _schemaSvc.LocateDacpac(TxtDacpacPath.Text.Trim());
+
+        if (result.Found)
+        {
+            _locatedDacpacPath = result.DacpacPath;
+            TxtDacpacStatus.Text = "✓ " + result.Message;
+            TxtDacpacStatus.Foreground = result.LooksLikeAzureVariant
+                ? (SolidColorBrush)FindResource("PassBrush")
+                : (SolidColorBrush)FindResource("WarnBrush");
+            AppendLog($"[Schema Sync] {result.Message}");
+        }
+        else
+        {
+            TxtDacpacStatus.Text = "✗ " + result.Message;
+            TxtDacpacStatus.Foreground = (SolidColorBrush)FindResource("FailBrush");
+        }
+
+        SetBusy(false); // refresh Generate/Apply enabled state
+    }
+
+    private SchemaSyncOptions SchemaSyncOptionsFromUi() => new()
+    {
+        BlockOnPossibleDataLoss = ChkBlockDataLoss.IsChecked == true,
+        DropObjectsNotInSource = ChkDropObjectsNotInSource.IsChecked == true
+    };
+
+    private async void BtnGenerateScript_Click(object sender, RoutedEventArgs e)
+    {
+        if (_locatedDacpacPath == null) return;
+
+        _cts = new CancellationTokenSource();
+        SetBusy(true);
+        SetStatus("Generating schema deployment script…");
+        AppendLog("\n─── SCHEMA SYNC: GENERATE SCRIPT ──────────────────────");
+
+        try
+        {
+            string script = await _schemaSvc.GenerateDeployScriptAsync(
+                ConnectionString(), _locatedDacpacPath, SchemaSyncOptionsFromUi(),
+                new Progress<string>(AppendLog), _cts.Token);
+
+            if (string.IsNullOrWhiteSpace(script))
+            {
+                AppendLog("  (no changes — schema already matches the DACPAC)");
+            }
+            else
+            {
+                AppendLog("─── Generated script ───────────────────────────────────");
+                AppendLog(script);
+                AppendLog("─── End of generated script ────────────────────────────");
+            }
+            SetStatus("Schema script generated");
+            BtnSaveReport.IsEnabled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("  Cancelled.");
+            SetStatus("Cancelled");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("BtnGenerateScript_Click", ex);
+            AppendLog($"  ERROR: {ex.Message}");
+            SetStatus("Schema script generation failed");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void BtnApplySchemaSync_Click(object sender, RoutedEventArgs e)
+    {
+        if (_locatedDacpacPath == null) return;
+
+        string db = $"{TxtServer.Text.Trim()} / {TxtDatabase.Text.Trim()}";
+        var confirm = MessageBox.Show(
+            $"This will deploy the DACPAC schema to:\n\n  {db}\n\n" +
+            "Any structural differences (missing columns, tables, procedures, etc.) will be added.\n" +
+            (ChkDropObjectsNotInSource.IsChecked == true
+                ? "Objects not present in the DACPAC WILL BE DROPPED.\n\n"
+                : "") +
+            "Review the generated script first if you haven't already.\n\nProceed?",
+            "Confirm Schema Sync",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
+        _cts = new CancellationTokenSource();
+        SetBusy(true);
+        SetStatus("Applying schema sync…");
+        AppendLog("\n─── SCHEMA SYNC: APPLY ─────────────────────────────────");
+
+        try
+        {
+            var result = await _schemaSvc.DeploySchemaAsync(
+                ConnectionString(), _locatedDacpacPath, SchemaSyncOptionsFromUi(),
+                new Progress<string>(AppendLog), _cts.Token);
+
+            AppendLog("\n─── RESULT ──────────────────────────────────────────");
+            if (result.Success)
+            {
+                AppendLog("  Status : SUCCESS — database schema now matches the DACPAC.");
+                SetStatus("Schema sync complete ✓");
+            }
+            else
+            {
+                AppendLog("  Status : FAILED");
+                AppendLog($"  Error  : {result.ErrorMessage}");
+                SetStatus("Schema sync failed");
+            }
+            BtnSaveReport.IsEnabled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("  Cancelled.");
+            SetStatus("Cancelled");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("BtnApplySchemaSync_Click", ex);
             AppendLog($"  FATAL: {ex.Message}");
             SetStatus("Error");
         }
