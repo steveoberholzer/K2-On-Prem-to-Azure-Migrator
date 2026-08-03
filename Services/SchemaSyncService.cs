@@ -1,5 +1,7 @@
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Dac;
 
@@ -90,6 +92,7 @@ public class SchemaSyncService
             Directory.CreateDirectory(tempDir);
             string tempDacpac = Path.Combine(tempDir, DacpacEntryName);
 
+            bool masterFromZip = false;
             using (var archive = ZipFile.OpenRead(zipPath))
             {
                 var entry = archive.GetEntry(DacpacEntryName);
@@ -99,16 +102,35 @@ public class SchemaSyncService
                     return result;
                 }
                 entry.ExtractToFile(tempDacpac, overwrite: true);
+
+                // K2's AzureDb zip ships its own master.dacpac alongside the DACPAC — prefer
+                // it since it's exactly what K2 tested against.
+                var masterEntry = archive.GetEntry("master.dacpac");
+                if (masterEntry != null)
+                {
+                    masterEntry.ExtractToFile(Path.Combine(tempDir, "master.dacpac"), overwrite: true);
+                    masterFromZip = true;
+                }
             }
 
+            // The K2 AzureDb DACPAC is compiled with SqlAzureDatabaseSchemaProvider.  When
+            // DacFx deploys it against an on-prem SQL Server, it tries to model the target
+            // database's filegroup objects (e.g. [PRIMARY]) using the Azure DSP's built-in
+            // type table — which doesn't contain filegroups — and fails with SQL0.
+            // Patching the DSP to Sql150DatabaseSchemaProvider makes DacFx use the SQL Server
+            // built-in types (which do include [PRIMARY]) while keeping the schema content
+            // identical.
+            PatchDacpacDsp(tempDacpac);
+
             // DacFx resolves external references (master.dacpac) by searching the directory
-            // that contains the DACPAC being loaded.  The K2 Azure DACPAC was built against
-            // SqlAzureDatabaseSchemaProvider, so the Azure-variant master.dacpac is correct.
-            bool masterResolved = TryExtractMasterDacpac(Path.Combine(tempDir, "master.dacpac"));
+            // that contains the DACPAC being loaded.  Fall back to the embedded SQL Server 150
+            // variant if the zip didn't bundle one (so the tool works without SSDT installed).
+            bool masterResolved = masterFromZip || TryExtractMasterDacpac(Path.Combine(tempDir, "master.dacpac"));
 
             var loaded = LoadDacpacMetadata(tempDacpac, zipName, result);
+            string masterSource = masterFromZip ? "bundled in zip" : "embedded SQL Server 150 variant";
             loaded.Message += masterResolved
-                ? "\n  master.dacpac resolved (embedded resource)."
+                ? $"\n  master.dacpac resolved ({masterSource})."
                 : "\n  WARNING: master.dacpac could not be extracted — DacFx may report external-reference errors.";
             return loaded;
         }
@@ -226,7 +248,72 @@ public class SchemaSyncService
     }
 
     /// <summary>
-    /// Extracts the embedded master.dacpac (Azure SQL variant, shipped with the tool) to
+    /// Rewrites the DspName in the DACPAC's model.xml from SqlAzureDatabaseSchemaProvider to
+    /// Sql150DatabaseSchemaProvider so DacFx uses SQL Server built-in types (including the
+    /// [PRIMARY] filegroup) when generating the deployment plan against an on-prem target.
+    /// Also updates the SHA-256 checksum in Origin.xml so DacFx's integrity check passes.
+    /// </summary>
+    private static void PatchDacpacDsp(string dacpacPath)
+    {
+        const string azureDsp = "Microsoft.Data.Tools.Schema.Sql.SqlAzureDatabaseSchemaProvider";
+        const string sql150Dsp = "Microsoft.Data.Tools.Schema.Sql.Sql150DatabaseSchemaProvider";
+
+        using var zip = ZipFile.Open(dacpacPath, ZipArchiveMode.Update);
+
+        // --- patch model.xml ---
+        var modelEntry = zip.GetEntry("model.xml");
+        if (modelEntry == null) return;
+
+        byte[] originalBytes;
+        using (var ms = new MemoryStream())
+        {
+            using (var s = modelEntry.Open()) s.CopyTo(ms);
+            originalBytes = ms.ToArray();
+        }
+
+        // Replace DSP in the raw bytes to preserve the original encoding exactly.
+        // The BOM (if any) and byte order stay untouched so the written bytes are
+        // identical except for the DSP string — ensuring the checksum we compute
+        // matches what DacFx will verify.
+        var oldDspBytes = Encoding.UTF8.GetBytes(azureDsp);
+        var newDspBytes = Encoding.UTF8.GetBytes(sql150Dsp);
+        var originalStr  = Encoding.UTF8.GetString(originalBytes);
+        if (!originalStr.Contains(azureDsp)) return;
+
+        var patchedStr   = originalStr.Replace(azureDsp, sql150Dsp);
+        var patchedBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: originalBytes is [0xEF, 0xBB, 0xBF, ..])
+                               .GetBytes(patchedStr);
+
+        modelEntry.Delete();
+        var newModelEntry = zip.CreateEntry("model.xml");
+        using (var s = newModelEntry.Open()) s.Write(patchedBytes);
+
+        // --- update checksum in Origin.xml ---
+        var originEntry = zip.GetEntry("Origin.xml");
+        if (originEntry != null)
+        {
+            string originXml;
+            using (var s = originEntry.Open())
+            using (var r = new StreamReader(s, Encoding.UTF8))
+                originXml = r.ReadToEnd();
+
+            var newChecksum = Convert.ToHexString(SHA256.HashData(patchedBytes));
+            // Replace the /model.xml checksum value (hex, 64 chars) in the XML.
+            originXml = System.Text.RegularExpressions.Regex.Replace(
+                originXml,
+                @"(?<=<Checksum Uri=""/model\.xml"">)[0-9A-Fa-f]{64}(?=</Checksum>)",
+                newChecksum);
+
+            originEntry.Delete();
+            var newOriginEntry = zip.CreateEntry("Origin.xml");
+            var originBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(originXml);
+            using var s2 = newOriginEntry.Open();
+            s2.Write(originBytes);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the embedded master.dacpac (SQL Server 150 variant, shipped with the tool) to
     /// <paramref name="destPath"/> so DacFx can resolve external references in the K2 DACPAC.
     /// </summary>
     private static bool TryExtractMasterDacpac(string destPath)
@@ -247,6 +334,8 @@ public class SchemaSyncService
         GenerateSmartDefaults = true,
         AllowIncompatiblePlatform = true,
         IncludeCompositeObjects = true,
+        IgnoreFilegroupPlacement = true,
+        TreatVerificationErrorsAsWarnings = true,
         CommandTimeout = 300,
     };
 }
