@@ -85,7 +85,10 @@ public class SchemaSyncService
             }
 
             string zipName = Path.GetFileName(zipPath);
-            string tempDacpac = Path.Combine(Path.GetTempPath(), $"K2AzureMigrator_{Guid.NewGuid():N}.dacpac");
+
+            string tempDir = Path.Combine(Path.GetTempPath(), $"K2AzureMigrator_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDir);
+            string tempDacpac = Path.Combine(tempDir, DacpacEntryName);
 
             using (var archive = ZipFile.OpenRead(zipPath))
             {
@@ -98,7 +101,16 @@ public class SchemaSyncService
                 entry.ExtractToFile(tempDacpac, overwrite: true);
             }
 
-            return LoadDacpacMetadata(tempDacpac, zipName, result);
+            // DacFx resolves external references (master.dacpac) by searching the directory
+            // that contains the DACPAC being loaded.  The K2 Azure DACPAC was built against
+            // SqlAzureDatabaseSchemaProvider, so the Azure-variant master.dacpac is correct.
+            bool masterResolved = TryExtractMasterDacpac(Path.Combine(tempDir, "master.dacpac"));
+
+            var loaded = LoadDacpacMetadata(tempDacpac, zipName, result);
+            loaded.Message += masterResolved
+                ? "\n  master.dacpac resolved (embedded resource)."
+                : "\n  WARNING: master.dacpac could not be extracted — DacFx may report external-reference errors.";
+            return loaded;
         }
         catch (Exception ex)
         {
@@ -211,6 +223,21 @@ public class SchemaSyncService
 
             return result;
         }, ct);
+    }
+
+    /// <summary>
+    /// Extracts the embedded master.dacpac (Azure SQL variant, shipped with the tool) to
+    /// <paramref name="destPath"/> so DacFx can resolve external references in the K2 DACPAC.
+    /// </summary>
+    private static bool TryExtractMasterDacpac(string destPath)
+    {
+        const string resourceName = "K2AzureMigrator.Resources.master.dacpac";
+        using var stream = typeof(SchemaSyncService).Assembly.GetManifestResourceStream(resourceName);
+        if (stream == null)
+            return false;
+        using var file = File.Create(destPath);
+        stream.CopyTo(file);
+        return true;
     }
 
     private static DacDeployOptions BuildDeployOptions(SchemaSyncOptions options) => new()

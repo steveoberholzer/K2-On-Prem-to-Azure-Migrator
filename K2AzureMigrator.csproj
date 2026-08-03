@@ -13,4 +13,8 @@
     <PackageReference Include="Microsoft.SqlServer.DacFx" Version="162.3.566" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\master.dacpac" />
+  </ItemGroup>
+
 </Project>
