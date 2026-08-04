@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -368,9 +369,17 @@ public partial class MainWindow : Window
             }
             else
             {
-                AppendLog("─── Generated script ───────────────────────────────────");
-                AppendLog(script);
-                AppendLog("─── End of generated script ────────────────────────────");
+                // Writing the full script (potentially 100k+ lines) to TxtLog would freeze the UI.
+                // Save it to a file and show the path instead.
+                string scriptPath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"K2SchemaSync_{DateTime.Now:yyyyMMdd_HHmmss}.sql");
+                File.WriteAllText(scriptPath, script, Encoding.UTF8);
+                int lineCount = script.Count(c => c == '\n');
+                AppendLog($"─── Script saved ({lineCount:N0} lines) ─────────────────────────────────");
+                AppendLog($"  Path: {scriptPath}");
+                AppendLog($"  Review this file — look especially for any DROP statements.");
+                AppendLog("  When satisfied, click 'Apply Schema Sync' to execute it.");
             }
             SetStatus("Schema script generated");
             BtnSaveReport.IsEnabled = true;
