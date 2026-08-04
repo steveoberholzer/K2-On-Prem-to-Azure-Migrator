@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private readonly MigrationService _svc = new();
     private readonly SchemaSyncService _schemaSvc = new();
+    private readonly BacpacExportService _bacpacSvc = new();
     private readonly ObservableCollection<PreFlightCheck> _checks = [];
     private CancellationTokenSource? _cts;
     private string _lastLog = "";
@@ -73,6 +74,9 @@ public partial class MainWindow : Window
             BtnLocateDacpac.IsEnabled = !busy;
             BtnGenerateScript.IsEnabled = !busy && _locatedDacpacPath != null;
             BtnApplySchemaSync.IsEnabled = !busy && _locatedDacpacPath != null;
+
+            BtnBrowseBacpac.IsEnabled = !busy;
+            BtnExportBacpac.IsEnabled = !busy;
         });
     }
 
@@ -473,6 +477,71 @@ public partial class MainWindow : Window
         finally
         {
             asTimer.Stop();
+            SetBusy(false);
+        }
+    }
+
+    // ── Export BACPAC ────────────────────────────────────────────────────────
+
+    private void BtnBrowseBacpac_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SaveFileDialog
+        {
+            Title       = "Save BACPAC",
+            FileName    = $"K2_{DateTime.Now:yyyyMMdd}.bacpac",
+            Filter      = "BACPAC files (*.bacpac)|*.bacpac|All files (*.*)|*.*",
+            DefaultExt  = "bacpac",
+        };
+        if (dlg.ShowDialog() == true)
+            TxtBacpacPath.Text = dlg.FileName;
+    }
+
+    private async void BtnExportBacpac_Click(object sender, RoutedEventArgs e)
+    {
+        string destPath = TxtBacpacPath.Text.Trim();
+        if (string.IsNullOrWhiteSpace(destPath))
+        {
+            MessageBox.Show("Choose a destination file first.", "Export BACPAC",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _cts = new CancellationTokenSource();
+        SetBusy(true);
+        AppendLog($"\n─── BACPAC EXPORT ──────────────────────────────────────");
+
+        var beStart  = DateTime.Now;
+        var bePhase  = "Starting";
+        var beTimer  = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        beTimer.Tick += (_, _) =>
+            TxtHeaderStatus.Text = $"Exporting BACPAC — {bePhase} ({(int)(DateTime.Now - beStart).TotalSeconds}s)";
+        beTimer.Start();
+
+        var phaseProgress = new Progress<string>(phase => bePhase = phase);
+
+        try
+        {
+            await _bacpacSvc.ExportAsync(
+                ConnectionString(), destPath,
+                new Progress<string>(AppendLog), phaseProgress, _cts.Token);
+
+            SetStatus("BACPAC export complete ✓");
+            BtnSaveReport.IsEnabled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("  Cancelled.");
+            SetStatus("Cancelled");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("BtnExportBacpac_Click", ex);
+            AppendLog($"  ERROR: {ex.Message}");
+            SetStatus("BACPAC export failed");
+        }
+        finally
+        {
+            beTimer.Stop();
             SetBusy(false);
         }
     }

@@ -525,6 +525,57 @@
                     </Grid>
                 </Grid>
             </TabItem>
+
+            <!-- ── TAB 3: EXPORT BACPAC ───────────────────────────────────────── -->
+            <TabItem Header="3. Export BACPAC" Style="{StaticResource FlatTabItem}">
+                <Grid Margin="12,4,12,4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Destination -->
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="BACPAC DESTINATION" Style="{StaticResource SectionHead}"/>
+                            <TextBlock FontSize="11" Foreground="{StaticResource LabelBrush}" Margin="0,0,0,8" TextWrapping="Wrap">
+                                The BACPAC will contain the full schema and data.
+                                Export time scales with database size — the log records start time, finish time, and duration
+                                so you can baseline your migration window.
+                            </TextBlock>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Output file" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <TextBox Grid.Column="1" x:Name="TxtBacpacPath" Style="{StaticResource TxtInput}"
+                                         ToolTip="Destination .bacpac file path"/>
+                                <Button Grid.Column="3" x:Name="BtnBrowseBacpac" Content="Browse…"
+                                        Style="{StaticResource SecBtn}" Width="90" Click="BtnBrowseBacpac_Click"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Actions -->
+                    <Grid Grid.Row="1" VerticalAlignment="Top">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" FontSize="11" Foreground="{StaticResource LabelBrush}"
+                                   VerticalAlignment="Center" TextWrapping="Wrap">
+                            Run Phase 2 (Schema Sync) before exporting so the BACPAC carries the Azure-compatible schema.
+                            The header shows elapsed time and current phase while the export runs.
+                        </TextBlock>
+                        <Button Grid.Column="1" x:Name="BtnExportBacpac" Content="Export BACPAC"
+                                Style="{StaticResource PrimaryBtn}" Width="140"
+                                Click="BtnExportBacpac_Click"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
         </TabControl>
 
         <!-- ══ LOG (shared) ═════════════════════════════════════════════════════ -->
