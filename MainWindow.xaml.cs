@@ -354,8 +354,13 @@ public partial class MainWindow : Window
 
         _cts = new CancellationTokenSource();
         SetBusy(true);
-        SetStatus("Generating schema deployment script…");
         AppendLog("\n─── SCHEMA SYNC: GENERATE SCRIPT ──────────────────────");
+
+        var gsStart = DateTime.Now;
+        var gsTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        gsTimer.Tick += (_, _) =>
+            TxtHeaderStatus.Text = $"Generating script… ({(int)(DateTime.Now - gsStart).TotalSeconds}s)";
+        gsTimer.Start();
 
         try
         {
@@ -397,6 +402,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            gsTimer.Stop();
             SetBusy(false);
         }
     }
@@ -422,14 +428,22 @@ public partial class MainWindow : Window
 
         _cts = new CancellationTokenSource();
         SetBusy(true);
-        SetStatus("Applying schema sync…");
         AppendLog("\n─── SCHEMA SYNC: APPLY ─────────────────────────────────");
+
+        var asStart = DateTime.Now;
+        var asPhase = "Starting";
+        var asTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        asTimer.Tick += (_, _) =>
+            TxtHeaderStatus.Text = $"Applying schema sync — {asPhase} ({(int)(DateTime.Now - asStart).TotalSeconds}s)";
+        asTimer.Start();
+
+        var phaseProgress = new Progress<string>(phase => asPhase = phase);
 
         try
         {
             var result = await _schemaSvc.DeploySchemaAsync(
                 ConnectionString(), _locatedDacpacPath, SchemaSyncOptionsFromUi(),
-                new Progress<string>(AppendLog), _cts.Token);
+                new Progress<string>(AppendLog), phaseProgress, _cts.Token);
 
             AppendLog("\n─── RESULT ──────────────────────────────────────────");
             if (result.Success)
@@ -458,6 +472,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            asTimer.Stop();
             SetBusy(false);
         }
     }

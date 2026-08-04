@@ -209,6 +209,7 @@ public class SchemaSyncService
         string dacpacPath,
         SchemaSyncOptions options,
         IProgress<string> log,
+        IProgress<string>? phaseProgress = null,
         CancellationToken ct = default)
     {
         return Task.Run(() =>
@@ -221,7 +222,12 @@ public class SchemaSyncService
                 using var package = DacPackage.Load(dacpacPath);
                 var dacServices = new DacServices(connectionString);
                 dacServices.Message += (_, e) => Log($"  [DacFx] {e.Message}");
-                dacServices.ProgressChanged += (_, e) => Log($"  [DacFx] {e.Status}: {e.Message}");
+                dacServices.ProgressChanged += (_, e) =>
+                {
+                    Log($"  [DacFx] {e.Status}: {e.Message}");
+                    if (e.Status.ToString() == "Running")
+                        phaseProgress?.Report(e.Message);
+                };
 
                 string dbName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
                 var deployOptions = BuildDeployOptions(options);
@@ -336,6 +342,7 @@ public class SchemaSyncService
         IncludeCompositeObjects = true,
         IgnoreFilegroupPlacement = true,
         TreatVerificationErrorsAsWarnings = true,
+        ScriptNewConstraintValidation = false,
         CommandTimeout = 300,
     };
 }
