@@ -576,6 +576,88 @@
                     </Grid>
                 </Grid>
             </TabItem>
+
+            <!-- ── TAB 4: IMPORT TO AZURE SQL ─────────────────────────────────── -->
+            <TabItem Header="4. Import to Azure SQL">
+                <Grid Margin="12,4,12,4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- BACPAC source -->
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="BACPAC SOURCE" Style="{StaticResource SectionHead}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="BACPAC file" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <TextBox Grid.Column="1" x:Name="TxtImportBacpacPath" Style="{StaticResource TxtInput}"
+                                         ToolTip="Path to the .bacpac produced in Phase 3"/>
+                                <Button Grid.Column="3" x:Name="BtnBrowseImportBacpac" Content="Browse…"
+                                        Style="{StaticResource SecBtn}" Width="90" Click="BtnBrowseImportBacpac_Click"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Azure SQL target -->
+                    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="AZURE SQL TARGET" Style="{StaticResource SectionHead}"/>
+                            <!-- Server + Database -->
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="160"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Server" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <TextBox Grid.Column="1" x:Name="TxtAzureServer" Style="{StaticResource TxtInput}"
+                                         ToolTip="e.g. myserver.database.windows.net"/>
+                                <TextBlock Grid.Column="3" Text="Database" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <TextBox Grid.Column="4" x:Name="TxtAzureDatabase" Style="{StaticResource TxtInput}" Text="K2"/>
+                            </Grid>
+                            <!-- Username + Password -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Username" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <TextBox Grid.Column="1" x:Name="TxtAzureUser" Style="{StaticResource TxtInput}"/>
+                                <TextBlock Grid.Column="3" Text="Password" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
+                                <PasswordBox Grid.Column="4" x:Name="PwdAzure" Style="{StaticResource PwdInput}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Actions -->
+                    <Grid Grid.Row="2" VerticalAlignment="Top">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" FontSize="11" Foreground="{StaticResource LabelBrush}"
+                                   VerticalAlignment="Center" TextWrapping="Wrap">
+                            Creates the target database in Azure SQL and streams the full BACPAC into it.
+                            This step includes network upload — the duration here is your true live migration window.
+                        </TextBlock>
+                        <Button Grid.Column="1" x:Name="BtnImportBacpac" Content="Import to Azure SQL"
+                                Style="{StaticResource DangerBtn}" Width="160" Click="BtnImportBacpac_Click"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
         </TabControl>
 
         <!-- ══ LOG (shared) ═════════════════════════════════════════════════════ -->

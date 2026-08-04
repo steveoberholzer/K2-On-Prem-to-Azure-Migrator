@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly MigrationService _svc = new();
     private readonly SchemaSyncService _schemaSvc = new();
     private readonly BacpacExportService _bacpacSvc = new();
+    private readonly BacpacImportService _importSvc = new();
     private readonly ObservableCollection<PreFlightCheck> _checks = [];
     private CancellationTokenSource? _cts;
     private string _lastLog = "";
@@ -77,6 +78,9 @@ public partial class MainWindow : Window
 
             BtnBrowseBacpac.IsEnabled = !busy;
             BtnExportBacpac.IsEnabled = !busy;
+
+            BtnBrowseImportBacpac.IsEnabled = !busy;
+            BtnImportBacpac.IsEnabled = !busy;
         });
     }
 
@@ -542,6 +546,80 @@ public partial class MainWindow : Window
         finally
         {
             beTimer.Stop();
+            SetBusy(false);
+        }
+    }
+
+    // ── Import BACPAC ────────────────────────────────────────────────────────
+
+    private void BtnBrowseImportBacpac_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title      = "Select BACPAC file",
+            Filter     = "BACPAC files (*.bacpac)|*.bacpac|All files (*.*)|*.*",
+            DefaultExt = "bacpac",
+        };
+        if (dlg.ShowDialog() == true)
+            TxtImportBacpacPath.Text = dlg.FileName;
+    }
+
+    private async void BtnImportBacpac_Click(object sender, RoutedEventArgs e)
+    {
+        string bacpacPath = TxtImportBacpacPath.Text.Trim();
+        string server     = TxtAzureServer.Text.Trim();
+        string database   = TxtAzureDatabase.Text.Trim();
+        string user       = TxtAzureUser.Text.Trim();
+        string password   = PwdAzure.Password;
+
+        if (string.IsNullOrWhiteSpace(bacpacPath) || string.IsNullOrWhiteSpace(server)
+            || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
+        {
+            MessageBox.Show("Fill in all fields before importing.", "Import to Azure SQL",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Connect to the server (master) — DacFx creates the target database from there.
+        string connStr = $"Server=tcp:{server},1433;User ID={user};Password={password};" +
+                         "Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;";
+
+        _cts = new CancellationTokenSource();
+        SetBusy(true);
+        AppendLog($"\n─── BACPAC IMPORT ──────────────────────────────────────");
+
+        var biStart = DateTime.Now;
+        var biPhase = "Starting";
+        var biTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        biTimer.Tick += (_, _) =>
+            TxtHeaderStatus.Text = $"Importing to Azure SQL — {biPhase} ({(int)(DateTime.Now - biStart).TotalSeconds}s)";
+        biTimer.Start();
+
+        var phaseProgress = new Progress<string>(phase => biPhase = phase);
+
+        try
+        {
+            await _importSvc.ImportAsync(
+                connStr, database, bacpacPath,
+                new Progress<string>(AppendLog), phaseProgress, _cts.Token);
+
+            SetStatus("Import to Azure SQL complete ✓");
+            BtnSaveReport.IsEnabled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("  Cancelled.");
+            SetStatus("Cancelled");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError("BtnImportBacpac_Click", ex);
+            AppendLog($"  ERROR: {ex.Message}");
+            SetStatus("Import failed");
+        }
+        finally
+        {
+            biTimer.Stop();
             SetBusy(false);
         }
     }
