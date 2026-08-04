@@ -27,6 +27,34 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         CheckList.ItemsSource = _checks;
+        LoadSettings();
+        Closing += (_, _) => SaveSettings();
+    }
+
+    // ── Settings persistence ─────────────────────────────────────────────────
+
+    private void LoadSettings()
+    {
+        var s = AppSettings.Load();
+        TxtAzureServer.Text       = s.AzureServer;
+        TxtAzureDatabase.Text     = s.AzureDatabase.Length > 0 ? s.AzureDatabase : "K2";
+        TxtAzureUser.Text         = s.AzureUser;
+        PwdAzure.Password         = s.AzurePassword;
+        TxtImportBacpacPath.Text  = s.ImportBacpacPath;
+        ChkDropIfExists.IsChecked = s.DropIfExists;
+    }
+
+    private void SaveSettings()
+    {
+        new AppSettings
+        {
+            AzureServer      = TxtAzureServer.Text.Trim(),
+            AzureDatabase    = TxtAzureDatabase.Text.Trim(),
+            AzureUser        = TxtAzureUser.Text.Trim(),
+            AzurePassword    = PwdAzure.Password,
+            ImportBacpacPath = TxtImportBacpacPath.Text.Trim(),
+            DropIfExists     = ChkDropIfExists.IsChecked == true,
+        }.Save();
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -80,6 +108,7 @@ public partial class MainWindow : Window
             BtnExportBacpac.IsEnabled = !busy;
 
             BtnBrowseImportBacpac.IsEnabled = !busy;
+            BtnTestAzureConn.IsEnabled = !busy;
             BtnImportBacpac.IsEnabled = !busy;
         });
     }
@@ -548,6 +577,31 @@ public partial class MainWindow : Window
             beTimer.Stop();
             SetBusy(false);
         }
+    }
+
+    // ── Azure SQL Test Connection ────────────────────────────────────────────
+
+    private async void BtnTestAzureConn_Click(object sender, RoutedEventArgs e)
+    {
+        BtnTestAzureConn.IsEnabled = false;
+        TxtAzureConnResult.Text = "Testing…";
+        TxtAzureConnResult.Foreground = (SolidColorBrush)FindResource("LabelBrush");
+
+        string server   = TxtAzureServer.Text.Trim();
+        string user     = TxtAzureUser.Text.Trim();
+        string password = PwdAzure.Password;
+
+        string connStr = $"Server=tcp:{server},1433;Database=master;User ID={user};Password={password};" +
+                         "Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
+
+        var (ok, msg) = await BacpacImportService.TestConnectionAsync(connStr);
+
+        TxtAzureConnResult.Text = ok ? $"✓ {msg}" : $"✗ {msg}";
+        TxtAzureConnResult.Foreground = ok
+            ? (SolidColorBrush)FindResource("PassBrush")
+            : (SolidColorBrush)FindResource("FailBrush");
+
+        BtnTestAzureConn.IsEnabled = true;
     }
 
     // ── Import BACPAC ────────────────────────────────────────────────────────

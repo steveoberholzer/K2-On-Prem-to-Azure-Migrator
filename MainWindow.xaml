@@ -639,6 +639,17 @@
                                 <TextBlock Grid.Column="3" Text="Password" Style="{StaticResource InputLabel}" Margin="0,0,7,0"/>
                                 <PasswordBox Grid.Column="4" x:Name="PwdAzure" Style="{StaticResource PwdInput}"/>
                             </Grid>
+                            <!-- Test Connection -->
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" x:Name="TxtAzureConnResult" FontSize="12"
+                                           VerticalAlignment="Center" Foreground="{StaticResource LabelBrush}"/>
+                                <Button Grid.Column="1" x:Name="BtnTestAzureConn" Content="Test Connection"
+                                        Style="{StaticResource SecBtn}" Width="140" Click="BtnTestAzureConn_Click"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

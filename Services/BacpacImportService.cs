@@ -6,6 +6,24 @@ namespace K2AzureMigrator.Services;
 
 public class BacpacImportService
 {
+    public static async Task<(bool ok, string message)> TestConnectionAsync(string connectionString)
+    {
+        try
+        {
+            string version = await Task.Run(() =>
+            {
+                using var conn = new SqlConnection(connectionString);
+                conn.Open();
+                return conn.ServerVersion;
+            });
+            return (true, $"Connected — Azure SQL v{version}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     public Task ImportAsync(
         string serverConnectionString,
         string targetDatabase,
