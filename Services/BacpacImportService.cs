@@ -10,6 +10,7 @@ public class BacpacImportService
         string serverConnectionString,
         string targetDatabase,
         string bacpacPath,
+        bool dropIfExists,
         IProgress<string> log,
         IProgress<string>? phaseProgress = null,
         CancellationToken ct = default)
@@ -22,6 +23,18 @@ public class BacpacImportService
             var fileMb = new FileInfo(bacpacPath).Length / (1024.0 * 1024.0);
             Log($"Source BACPAC : {bacpacPath} ({fileMb:F1} MB)");
             Log($"Target        : [{targetDatabase}] on {server}");
+
+            if (dropIfExists)
+            {
+                using var conn = new SqlConnection(serverConnectionString);
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{targetDatabase.Replace("'", "''")}') DROP DATABASE [{targetDatabase}]";
+                cmd.CommandTimeout = 120;
+                Log($"Dropping existing [{targetDatabase}] if present…");
+                cmd.ExecuteNonQuery();
+                Log("  Done.");
+            }
 
             using var bacpac = BacPackage.Load(bacpacPath);
             var dacServices = new DacServices(serverConnectionString);
@@ -37,7 +50,22 @@ public class BacpacImportService
             Log("Import started.");
 
             var startTime = DateTime.Now;
-            dacServices.ImportBacpac(bacpac, targetDatabase, cancellationToken: ct);
+            try
+            {
+                dacServices.ImportBacpac(bacpac, targetDatabase, cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                // Walk the full inner-exception chain so the operator sees the real SQL error,
+                // not just the top-level "Could not import package" wrapper.
+                var e = ex;
+                while (e != null)
+                {
+                    Log($"  ERROR: {e.Message}");
+                    e = e.InnerException;
+                }
+                throw;
+            }
 
             var duration = DateTime.Now - startTime;
             Log("Import finished.");

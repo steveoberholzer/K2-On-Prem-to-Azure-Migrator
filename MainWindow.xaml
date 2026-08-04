@@ -644,17 +644,26 @@
 
                     <!-- Actions -->
                     <Grid Grid.Row="2" VerticalAlignment="Top">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" FontSize="11" Foreground="{StaticResource LabelBrush}"
-                                   VerticalAlignment="Center" TextWrapping="Wrap">
-                            Creates the target database in Azure SQL and streams the full BACPAC into it.
-                            This step includes network upload — the duration here is your true live migration window.
-                        </TextBlock>
-                        <Button Grid.Column="1" x:Name="BtnImportBacpac" Content="Import to Azure SQL"
-                                Style="{StaticResource DangerBtn}" Width="160" Click="BtnImportBacpac_Click"/>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <CheckBox Grid.Row="0" x:Name="ChkDropIfExists" IsChecked="False" Margin="0,0,0,10"
+                                  Content="Drop and recreate target database if it already exists"
+                                  FontSize="12" Foreground="{StaticResource TextBrush}"/>
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" FontSize="11" Foreground="{StaticResource LabelBrush}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap">
+                                Creates the target database in Azure SQL and streams the full BACPAC into it.
+                                Duration here includes network upload — this is your true live migration window.
+                            </TextBlock>
+                            <Button Grid.Column="1" x:Name="BtnImportBacpac" Content="Import to Azure SQL"
+                                    Style="{StaticResource DangerBtn}" Width="160" Click="BtnImportBacpac_Click"/>
+                        </Grid>
                     </Grid>
                 </Grid>
             </TabItem>

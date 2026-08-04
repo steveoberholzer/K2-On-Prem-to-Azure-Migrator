@@ -601,6 +601,7 @@ public partial class MainWindow : Window
         {
             await _importSvc.ImportAsync(
                 connStr, database, bacpacPath,
+                ChkDropIfExists.IsChecked == true,
                 new Progress<string>(AppendLog), phaseProgress, _cts.Token);
 
             SetStatus("Import to Azure SQL complete ✓");
