@@ -38,6 +38,11 @@ public class BacpacExportService
 
             Log($"Destination: {destPath}");
 
+            // Azure SQL does not support Windows-authenticated users. DacFx will refuse to
+            // package them, so we drop them before export. They must be re-created in Azure AD
+            // after migration — they cannot be carried across as-is.
+            DropWindowsUsers(connectionString, Log);
+
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
             var dacServices = new DacServices(connectionString);
@@ -61,5 +66,54 @@ public class BacpacExportService
             Log($"  Duration  : {(int)duration.TotalMinutes}m {duration.Seconds:D2}s");
             Log($"  BACPAC    : {fileMb:F1} MB  →  {destPath}");
         }, ct);
+    }
+
+    private static void DropWindowsUsers(string connectionString, Action<string> log)
+    {
+        using var conn = new SqlConnection(connectionString);
+        conn.Open();
+
+        using var findCmd = conn.CreateCommand();
+        findCmd.CommandText = @"
+            SELECT name FROM sys.database_principals
+            WHERE type IN ('U', 'G')
+              AND name NOT IN ('dbo', 'guest', 'INFORMATION_SCHEMA', 'sys')
+            ORDER BY name";
+
+        var users = new List<string>();
+        using (var reader = findCmd.ExecuteReader())
+            while (reader.Read())
+                users.Add(reader.GetString(0));
+
+        if (users.Count == 0) return;
+
+        log($"Removing {users.Count} Windows-authenticated user(s) — not supported in Azure SQL:");
+        foreach (var u in users)
+            log($"  [{u}] (re-create in Azure AD after migration)");
+
+        // Transfer schema ownership to dbo before dropping users
+        using var xferCmd = conn.CreateCommand();
+        xferCmd.CommandText = @"
+            DECLARE @sql NVARCHAR(MAX) = '';
+            SELECT @sql += 'ALTER AUTHORIZATION ON SCHEMA::[' + s.name + '] TO [dbo];' + CHAR(13)
+            FROM sys.schemas s
+            JOIN sys.database_principals dp ON s.principal_id = dp.principal_id
+            WHERE dp.type IN ('U','G')
+              AND dp.name NOT IN ('dbo','guest','INFORMATION_SCHEMA','sys');
+            IF LEN(@sql) > 0 EXEC sp_executesql @sql;";
+        xferCmd.ExecuteNonQuery();
+
+        using var dropCmd = conn.CreateCommand();
+        dropCmd.CommandText = @"
+            DECLARE @sql NVARCHAR(MAX) = '';
+            SELECT @sql += 'DROP USER [' + name + '];' + CHAR(13)
+            FROM sys.database_principals
+            WHERE type IN ('U','G')
+              AND name NOT IN ('dbo','guest','INFORMATION_SCHEMA','sys')
+            ORDER BY name;
+            IF LEN(@sql) > 0 EXEC sp_executesql @sql;";
+        dropCmd.ExecuteNonQuery();
+
+        log("  Windows users removed — export can now proceed.");
     }
 }
