@@ -147,11 +147,16 @@ public class BacpacExportService
 
         log($"Stubbing {procs.Count} procedure(s) with Azure SQL-incompatible ALTER DATABASE statements:");
 
+        // Fetches parameter metadata without default values — defaults are unreliable
+        // to reconstruct from sql_variant and unnecessary for a no-op stub.
         const string paramsSql = @"
-            SELECT p.name, tp.name AS TypeName,
+            SELECT p.name,
+                   CASE WHEN tp.is_user_defined = 1
+                        THEN '[' + SCHEMA_NAME(tp.schema_id) + '].[' + tp.name + ']'
+                        ELSE tp.name END AS TypeRef,
+                   tp.name AS TypeName,
                    p.max_length, p.precision, p.scale,
-                   p.is_output, p.has_default_value,
-                   CAST(p.default_value AS NVARCHAR(200)) AS DefaultVal
+                   p.is_output, p.is_readonly
             FROM sys.parameters p
             JOIN sys.types tp ON p.user_type_id = tp.user_type_id
             WHERE p.object_id = @id AND p.parameter_id > 0
@@ -170,36 +175,30 @@ public class BacpacExportService
                     sb.Append(first ? "\r\n    " : ",\r\n    ");
                     first = false;
 
-                    string pName  = r.GetString(0);
-                    string tName  = r.GetString(1).ToUpperInvariant();
-                    short  maxLen = r.GetInt16(2);
-                    byte   prec   = r.GetByte(3);
-                    byte   scale  = r.GetByte(4);
-                    bool   isOut  = r.GetBoolean(5);
-                    bool   hasDef = r.GetBoolean(6);
-                    string? defVal = r.IsDBNull(7) ? null : r.GetString(7);
+                    string pName   = r.GetString(0);
+                    string typeRef = r.GetString(1);   // [schema].[udt] or plain sys type name
+                    string tName   = r.GetString(2).ToUpperInvariant();
+                    short  maxLen  = r.GetInt16(3);
+                    byte   prec    = r.GetByte(4);
+                    byte   scale   = r.GetByte(5);
+                    bool   isOut   = r.GetBoolean(6);
+                    bool   isRo    = r.GetBoolean(7);
 
+                    // Expand size/precision for system types; UDTs already carry their definition.
                     string typeStr = tName switch
                     {
-                        "NVARCHAR" or "NCHAR"     => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen / 2})",
-                        "VARCHAR"  or "CHAR"      => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
-                        "VARBINARY" or "BINARY"   => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
-                        "DECIMAL"  or "NUMERIC"   => $"{tName}({prec},{scale})",
-                        _                         => tName
+                        "NVARCHAR" or "NCHAR"   => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen / 2})",
+                        "VARCHAR"  or "CHAR"    => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
+                        "VARBINARY" or "BINARY" => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
+                        "DECIMAL"  or "NUMERIC" => $"{tName}({prec},{scale})",
+                        _                       => typeRef   // covers UDTs and simple types alike
                     };
 
                     sb.Append($"{pName} {typeStr}");
-
-                    if (hasDef && defVal != null)
-                    {
-                        // BIT defaults from sql_variant cast come back as "True"/"False" on some
-                        // SQL Server versions and as "0"/"1" on others — normalise both.
-                        string dv = tName == "BIT"
-                            ? (defVal.Equals("True", StringComparison.OrdinalIgnoreCase) ? "1" : "0")
-                            : defVal;
-                        sb.Append($" = {dv}");
-                    }
-                    if (isOut) sb.Append(" OUTPUT");
+                    // Defaults omitted — they're not needed for a no-op stub and are
+                    // unreliable to reconstruct from sql_variant (empty strings cause syntax errors).
+                    if (isRo)  sb.Append(" READONLY");
+                    else if (isOut) sb.Append(" OUTPUT");
                 }
             }
 
