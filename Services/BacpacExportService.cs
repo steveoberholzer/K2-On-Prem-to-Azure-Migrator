@@ -131,7 +131,7 @@ public class BacpacExportService
             SELECT o.object_id, SCHEMA_NAME(o.schema_id) AS [Schema], o.name
             FROM sys.objects o
             WHERE o.type = 'P'
-              AND OBJECT_DEFINITION(o.object_id) LIKE '%ALTER DATABASE [%'
+              AND OBJECT_DEFINITION(o.object_id) LIKE '%ALTER DATABASE%'
             ORDER BY SCHEMA_NAME(o.schema_id), o.name";
 
         using var conn = new SqlConnection(connectionString);
