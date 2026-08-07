@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Dac;
 
@@ -124,11 +125,12 @@ public class BacpacExportService
 
     private static void StubAzureIncompatibleProcedures(string connectionString, Action<string> log)
     {
-        // Find stored procedures that reference a named database in ALTER DATABASE — these
-        // are on-prem administrative procs (e.g. ALTER DATABASE [tempdb] SET PAGE_VERIFY)
-        // that Azure SQL will refuse to execute. We replace their bodies with a no-op stub.
+        // Read the original definition from OBJECT_DEFINITION — no parameter reconstruction.
+        // We swap CREATE→ALTER and replace everything from AS…BEGIN onwards with a no-op body.
+        // This avoids all parameter-type reconstruction issues.
         const string findSql = @"
-            SELECT o.object_id, SCHEMA_NAME(o.schema_id) AS [Schema], o.name
+            SELECT SCHEMA_NAME(o.schema_id) AS [Schema], o.name,
+                   OBJECT_DEFINITION(o.object_id) AS Definition
             FROM sys.objects o
             WHERE o.type = 'P'
               AND OBJECT_DEFINITION(o.object_id) LIKE '%ALTER DATABASE%'
@@ -137,79 +139,50 @@ public class BacpacExportService
         using var conn = new SqlConnection(connectionString);
         conn.Open();
 
-        var procs = new List<(int id, string schema, string name)>();
+        var procs = new List<(string schema, string name, string def)>();
         using (var cmd = new SqlCommand(findSql, conn))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
-                procs.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+                procs.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
 
         if (procs.Count == 0) return;
 
         log($"Stubbing {procs.Count} procedure(s) with Azure SQL-incompatible ALTER DATABASE statements:");
 
-        // Fetches parameter metadata without default values — defaults are unreliable
-        // to reconstruct from sql_variant and unnecessary for a no-op stub.
-        const string paramsSql = @"
-            SELECT p.name,
-                   CASE WHEN tp.is_user_defined = 1
-                        THEN '[' + SCHEMA_NAME(tp.schema_id) + '].[' + tp.name + ']'
-                        ELSE tp.name END AS TypeRef,
-                   tp.name AS TypeName,
-                   p.max_length, p.precision, p.scale,
-                   p.is_output, p.is_readonly
-            FROM sys.parameters p
-            JOIN sys.types tp ON p.user_type_id = tp.user_type_id
-            WHERE p.object_id = @id AND p.parameter_id > 0
-            ORDER BY p.parameter_id";
-
-        foreach (var (id, schema, name) in procs)
+        foreach (var (schema, name, def) in procs)
         {
-            var sb = new System.Text.StringBuilder();
-            using (var pCmd = new SqlCommand(paramsSql, conn))
+            log($"  [{schema}].[{name}]");
+
+            // 1. Flip CREATE → ALTER so the statement updates the existing object.
+            var altered = Regex.Replace(
+                def,
+                @"\bCREATE\s+PROCEDURE\b",
+                "ALTER PROCEDURE",
+                RegexOptions.IgnoreCase);
+
+            // 2. Find where the body starts: AS followed by whitespace then BEGIN.
+            //    \s+ spans newlines, so it matches both "AS BEGIN" and "AS\r\nBEGIN".
+            var bodyMatch = Regex.Match(
+                altered,
+                @"\bAS\b\s+BEGIN\b",
+                RegexOptions.IgnoreCase);
+
+            if (!bodyMatch.Success)
             {
-                pCmd.Parameters.AddWithValue("@id", id);
-                using var r = pCmd.ExecuteReader();
-                bool first = true;
-                while (r.Read())
-                {
-                    sb.Append(first ? "\r\n    " : ",\r\n    ");
-                    first = false;
-
-                    string pName   = r.GetString(0);
-                    string typeRef = r.GetString(1);   // [schema].[udt] or plain sys type name
-                    string tName   = r.GetString(2).ToUpperInvariant();
-                    short  maxLen  = r.GetInt16(3);
-                    byte   prec    = r.GetByte(4);
-                    byte   scale   = r.GetByte(5);
-                    bool   isOut   = r.GetBoolean(6);
-                    bool   isRo    = r.GetBoolean(7);
-
-                    // Expand size/precision for system types; UDTs already carry their definition.
-                    string typeStr = tName switch
-                    {
-                        "NVARCHAR" or "NCHAR"   => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen / 2})",
-                        "VARCHAR"  or "CHAR"    => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
-                        "VARBINARY" or "BINARY" => maxLen == -1 ? $"{tName}(MAX)" : $"{tName}({maxLen})",
-                        "DECIMAL"  or "NUMERIC" => $"{tName}({prec},{scale})",
-                        _                       => typeRef   // covers UDTs and simple types alike
-                    };
-
-                    sb.Append($"{pName} {typeStr}");
-                    // Defaults omitted — they're not needed for a no-op stub and are
-                    // unreliable to reconstruct from sql_variant (empty strings cause syntax errors).
-                    if (isRo)  sb.Append(" READONLY");
-                    else if (isOut) sb.Append(" OUTPUT");
-                }
+                // Fallback: drop the procedure if we can't locate the body boundary.
+                log($"    (body boundary not found — dropping procedure instead)");
+                using var drop = new SqlCommand(
+                    $"DROP PROCEDURE IF EXISTS [{schema}].[{name}]", conn);
+                drop.ExecuteNonQuery();
+                continue;
             }
 
-            string stub =
-                $"ALTER PROCEDURE [{schema}].[{name}]{sb}\r\n" +
-                "AS\r\nBEGIN\r\n" +
-                "    -- Stubbed for Azure SQL migration.\r\n" +
-                "    -- Original body contained ALTER DATABASE [named] statements unsupported in Azure SQL.\r\n" +
-                "    -- Re-implement using Azure SQL equivalents if this procedure is required.\r\nEND";
+            // 3. Keep everything up to (not including) AS…BEGIN, then write a no-op body.
+            var stub = altered[..bodyMatch.Index] +
+                       "\r\nAS\r\nBEGIN\r\n" +
+                       "    -- Stubbed: body contained ALTER DATABASE statements unsupported in Azure SQL.\r\n" +
+                       "END";
 
-            log($"  [{schema}].[{name}]");
             using var alterCmd = new SqlCommand(stub, conn);
             alterCmd.ExecuteNonQuery();
         }
